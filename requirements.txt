@@ -1,0 +1,4 @@
+colorama
+cli-badges
+pdf2docx
+python-docx

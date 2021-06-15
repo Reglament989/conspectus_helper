@@ -1,0 +1,205 @@
+#!/usr/bin/python
+from docx import Document
+from docx.shared import Pt, Inches
+from docx.shared import RGBColor
+from pdf2docx import Converter
+# pylint: disable=E0611
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from cli_badges import badge
+from colorama import init, Fore, Style, Back
+from pathlib import Path
+import argparse
+import uuid
+import os
+
+init()
+
+def convert(base_path):
+    pdf_file = base_path
+    docx_file = os.path.splitext(base_path)[0] + '.docx'
+    # convert pdf to docx
+    cv = Converter(pdf_file)
+    cv.convert(docx_file, start=0, end=None)
+    cv.close()
+    return docx_file
+
+class Controller:
+    root_dir = '.'
+    move_worked_out = True
+    all_files = 0
+    worked_out = 0
+    child = 0
+
+    docx_files = []
+    pdf_files = []
+    errors = []
+
+    def __init__(self, root):
+        self.root_dir = root
+
+    def add_file(self, path, is_pdf=False, pdf_path=''):
+        self.all_files += 1
+        self.docx_files.append(path)
+        if (is_pdf and pdf_path != ''):
+            self.pdf_files.append(pdf_path)
+
+    def clean_worked_out(self):
+        try:
+            os.mkdir('./old')
+        except:
+            pass
+        
+
+    def result(self):
+        successBadge = badge('Success', self.worked_out, messagebg='green',messagecolor='black')
+        errorsBadge = badge('Errors', len(self.errors), messagebg='red',messagecolor='black')
+        # print(Fore.GREEN + 'Finish. All - ', self.all_files)
+        print()
+        print('\t' + successBadge, end='\t')
+        print(errorsBadge)
+        # print(self.errors)
+        print(Style.RESET_ALL, end='')
+
+
+    def transpile(self, pathToDocument):
+        new_doc: Document = Document()
+        document: Document = Document(pathToDocument)
+
+        for par in document.paragraphs:
+            newPar = new_doc.add_paragraph()
+            newPar.paragraph_format.left_indent = Inches(-0.5)
+            newPar.paragraph_format.right_indent = Inches(-0.5)
+            newPar.alignment = WD_ALIGN_PARAGRAPH.LEFT
+            newPar.line_spacing = 1.75
+            run = newPar.add_run()
+            run.add_text(par.text)
+            run.font.name = "Eskal Font4You"
+            run.font.size = Pt(22)
+            run.font.color.rgb = RGBColor(54, 101, 164)
+        result_dir = os.path.join(os.path.curdir, "result")
+        if not os.path.exists(result_dir):
+            os.mkdir(result_dir)
+        new_doc.save(os.path.join(result_dir, uuid.uuid4().hex[:4] + "--" + os.path.basename(pathToDocument)))
+        self.worked_out += 1
+
+    def reprint_tree(self, paths):
+        for p in paths:
+            print(p)
+
+    def run(self):
+        files = DisplayablePath.make_tree(Path(self.root_dir))
+        current_paths = []
+        for path in files:
+            try:
+                disp = path.displayable()
+                current_paths.append(disp)
+                print(disp)
+                if path.path.is_file():
+                    if path.extension == "pdf":
+                        print(Style.DIM + Fore.LIGHTWHITE_EX, end='')
+                        docx = convert(path.abs_name)
+                        print(chr(27) + "[2J")
+                        print(Style.RESET_ALL, end='')
+                        self.reprint_tree(current_paths)
+                        self.transpile(docx)
+                        continue
+                    self.transpile(path.abs_name)
+            except Exception as e:
+                self.errors.append(e)
+        self.result()
+
+class DisplayablePath(object):
+    display_filename_prefix_middle = Fore.LIGHTYELLOW_EX + '├──'
+    display_filename_prefix_last = Fore.LIGHTYELLOW_EX + '└──'
+    display_parent_prefix_middle = '    '
+    display_parent_prefix_last = Fore.LIGHTYELLOW_EX + '│   '
+
+    def __init__(self, path, parent_path, is_last):
+        self.path = Path(str(path))
+        self.parent = parent_path
+        self.is_last = is_last
+        if self.parent:
+            self.depth = self.parent.depth + 1
+        else:
+            self.depth = 0
+
+    @property
+    def displayname(self):
+        if self.path.is_dir():
+            return Fore.CYAN + self.path.name + '/'
+        return Fore.CYAN + self.path.name
+    
+    @property
+    def abs_name(self):
+        return self.path.absolute()
+
+    @property
+    def extension(self):
+        return str(self.path.absolute()).split(".")[-1]
+
+    @classmethod
+    def make_tree(cls, root, parent=None, is_last=False, criteria=None):
+        root = Path(str(root))
+        criteria = criteria or cls._default_criteria
+
+        displayable_root = cls(root, parent, is_last)
+        yield displayable_root
+
+        children = sorted(list(path
+                               for path in root.iterdir()
+                               if criteria(path)),
+                          key=lambda s: str(s).lower())
+        count = 1
+        for path in children:
+            is_last = count == len(children)
+            if path.is_dir():
+                yield from cls.make_tree(path,
+                                         parent=displayable_root,
+                                         is_last=is_last,
+                                         criteria=criteria)
+            else:
+                yield cls(path, displayable_root, is_last)
+            count += 1
+
+    @classmethod
+    def _default_criteria(cls, path):
+        # print(path.as_uri())
+        if path.is_dir:
+            return True
+        
+        if path.absolute().split(".")[-1] in ["docx", "pdf"]:
+            return True
+        return False
+    def displayable(self):
+        if self.parent is None:
+            return self.displayname
+
+        _filename_prefix = (self.display_filename_prefix_last
+                            if self.is_last
+                            else self.display_filename_prefix_middle)
+
+        parts = ['{!s} {!s}'.format(_filename_prefix,
+                                    self.displayname)]
+
+        parent = self.parent
+        while parent and parent.parent is not None:
+            parts.append(self.display_parent_prefix_middle
+                         if parent.is_last
+                         else self.display_parent_prefix_last)
+            parent = parent.parent
+
+        return ''.join(reversed(parts))
+
+def main():
+    parser = argparse.ArgumentParser(description='Translate docx and pdf to other font docx')
+    parser.add_argument('path', type=str, default='.',
+                        help='dir of sources')
+
+    args = parser.parse_args()
+    dir_path = os.path.abspath(args.path)
+    Controller(dir_path).run()
+
+
+
+if __name__ == "__main__":
+    main()
