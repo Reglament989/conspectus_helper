@@ -14,7 +14,7 @@ pip install -r requirements.txt
 
 10150.ttf its font - Eskal Font4You (Enough truthful and beautiful font, looks like a letter from hand)
 
-```
+```bash
 mv 10150.ttf ~/.local/share/fonts/ && fc-cache
 ```
 
